@@ -1,0 +1,23 @@
+{
+  "name": "excel-to-json-tool",
+  "version": "1.0.0",
+  "description": "Excel to JSON converter with batch processing support",
+  "main": "excel2json.js",
+  "scripts": {
+    "convert": "node excel2json.js",
+    "new-project": "node project-generator.js",
+    "help": "node excel2json.js --help"
+  },
+  "keywords": ["excel", "json", "converter", "batch"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "xlsx": "^0.18.5",
+    "fs-extra": "^11.1.1",
+    "yargs": "^17.7.2",
+    "chalk": "^4.1.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
