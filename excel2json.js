@@ -74,14 +74,18 @@ class ExcelToJsonConverter {
                         const convertedData = this.detectAndConvertStructure(jsonData, sheetName);
                         
                         // 生成输出文件名
-                        const outputFileName = sheetNames.length > 1 ? 
-                            `${fileName}_${this.sanitizeFileName(sheetName)}.json` : 
+                        // const outputFileName = sheetNames.length > 1 ? 
+                        //     `${fileName}_${this.sanitizeFileName(sheetName)}.json` : 
+                        //     `${fileName}.json`;
+                        // 生成输出文件名 -多张子表就直接使用工作表名，一个表就显示表文件名
+                            const outputFileName = sheetNames.length > 1 ? 
+                            `${this.sanitizeFileName(sheetName)}.json` : 
                             `${fileName}.json`;
                         
                         const outputPath = path.join(outputDir, outputFileName);
                         
-                        // 保存 JSON 文件
-                        await fs.writeJson(outputPath, convertedData, { spaces: 2 });
+                        // 保存 JSON 文件 - 不换行
+                        await fs.writeJson(outputPath, convertedData, { spaces: 0 });
                         
                         const recordCount = Array.isArray(convertedData) ? convertedData.length : Object.keys(convertedData).length;
                         const structureType = Array.isArray(convertedData) ? '数组' : '键值对';
@@ -165,19 +169,58 @@ class ExcelToJsonConverter {
 
             // 第一列是key，第二列是value
             const key = row[0];
-            const value = row[1];
             
             if (key !== undefined && key !== '' && key !== null) {
                 const processedKey = this.processKey(key);
-                const processedValue = this.processValue(value, key);
                 
-                result[processedKey] = processedValue;
-                console.log(chalk.gray(`    ${processedKey} = ${JSON.stringify(processedValue)}`));
+                // 检测是否为数组字段（key以[]结尾）
+                if (this.isArrayField(key)) {
+                    const arrayValues = this.extractArrayValues(row);
+                    result[processedKey] = arrayValues;
+                    console.log(chalk.gray(`    ${processedKey} = ${JSON.stringify(arrayValues)} (数组)`));
+                } else {
+                    const value = row[1];
+                    const processedValue = this.processValue(value, key);
+                    result[processedKey] = processedValue;
+                    console.log(chalk.gray(`    ${processedKey} = ${JSON.stringify(processedValue)}`));
+                }
             }
         }
         
         console.log(chalk.gray(`  ✅ 键值对转换完成，共 ${Object.keys(result).length} 个键值对`));
         return result;
+    }
+
+    /**
+     * 检测是否为数组字段
+     */
+    isArrayField(key) {
+        if (typeof key !== 'string') return false;
+        return key.trim().endsWith('[]');
+    }
+
+    /**
+     * 提取数组值
+     */
+    extractArrayValues(row) {
+        const arrayValues = [];
+        
+        // 从第二列开始（索引1），跳过空值
+        for (let i = 1; i < row.length; i++) {
+            const value = row[i];
+            
+            // 遇到空值就停止（Excel中数组值应该是连续的）
+            if (value === '' || value === null || value === undefined) {
+                break;
+            }
+            
+            const processedValue = this.processValue(value, 'array');
+            if (processedValue !== null) {
+                arrayValues.push(processedValue);
+            }
+        }
+        
+        return arrayValues;
     }
 
     /**
@@ -188,12 +231,22 @@ class ExcelToJsonConverter {
         
         if (data.length < 2) return result;
         
-        const headers = data[0];
+        // 查找真正的标题行（以id或key开头）
+        let headerRowIndex = this.findHeaderRowIndex(data);
         
-        console.log(chalk.gray(`  📝 标题行: ${JSON.stringify(headers)}`));
+        if (headerRowIndex === -1) {
+            console.log(chalk.yellow('  ⚠️  未找到有效的标题行，使用第一行作为标题'));
+            headerRowIndex = 0;
+        } else {
+            console.log(chalk.gray(`  📝 跳过 ${headerRowIndex} 行注释，从第 ${headerRowIndex + 1} 行开始作为标题`));
+        }
+        
+        const headers = data[headerRowIndex];
+        
+        console.log(chalk.gray(`  📋 标题行: ${JSON.stringify(headers)}`));
 
-        // 从第二行开始处理数据（跳过标题行）
-        for (let i = 1; i < data.length; i++) {
+        // 从标题行的下一行开始处理数据
+        for (let i = headerRowIndex + 1; i < data.length; i++) {
             const row = data[i];
             const item = {};
             
@@ -223,11 +276,35 @@ class ExcelToJsonConverter {
     }
 
     /**
+     * 查找真正的标题行索引
+     */
+    findHeaderRowIndex(data) {
+        for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            if (!row || row.length === 0) continue;
+            
+            const firstCell = row[0];
+            if (!firstCell) continue;
+            
+            const firstCellStr = String(firstCell).toLowerCase().trim();
+            
+            // 如果第一列是 "id" 或 "key"，则认为是标题行
+            if (firstCellStr === 'id' || firstCellStr === 'key') {
+                console.log(chalk.gray(`  🔍 在第 ${i + 1} 行找到标题行: "${firstCell}"`));
+                return i;
+            }
+        }
+        
+        return -1;
+    }
+
+    /**
      * 处理键名
      */
     processKey(key) {
         if (typeof key !== 'string') return String(key);
-        return key.trim();
+        // 移除数组标识符 []
+        return key.replace(/\[\]$/, '').trim();
     }
 
     /**
